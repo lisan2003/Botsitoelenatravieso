@@ -6,12 +6,13 @@ import { getCurrentCalendar } from "../services/calendar";
 import { getFullCurrentDate } from "src/utils/currentDate";
 import { flowConfirm } from "./confirm.flow";
 import { addMinutes, isWithinInterval, format, parse, setHours, setMinutes, isValid, isAfter } from "date-fns";
+import * as chrono from "chrono-node";
 
 // Definir horario de apertura y cierre del negocio
 const BUSINESS_HOURS = {
     start: '09:00', // Hora de apertura (formato 24h)
     end: '18:00',   // Hora de cierre (formato 24h)
-    days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], // Días de la semana
+    days: ['lunes','martes','miercoles','jueves','viernes'], // Días de la semana
 };
 
 const DURATION_MEET = Number(process.env.DURATION_MEET) ?? 45;
@@ -38,30 +39,25 @@ const generatePromptFilter = (history: string) => {
     return mainPrompt;
 };
 
-// Función para redondear la fecha al siguiente bloque de 30 minutos
 const roundToNearest30Minutes = (date: Date) => {
     const minutes = date.getMinutes();
     const roundedMinutes = Math.ceil(minutes / 30) * 30;
     return setMinutes(setHours(date, date.getHours()), roundedMinutes);
 };
 
-// Función para validar que la hora esté dentro del horario de atención
 const isBusinessHours = (desiredDate) => {
-    const dayOfWeek = format(desiredDate, 'iiii'); // Obtener el día de la semana (ej. 'Monday', 'Tuesday', etc.)
+    const dayOfWeek = format(desiredDate, 'iiii'); 
 
-    // Verificar si el día está dentro de los días de operación del negocio
     if (!BUSINESS_HOURS.days.includes(dayOfWeek)) {
         return false;
     }
 
-    // Obtener las horas de apertura y cierre
-    const startOfDay = setHours(setMinutes(new Date(desiredDate), 0), 9); // 09:00
-    const endOfDay = setHours(setMinutes(new Date(desiredDate), 0), 18); // 18:00
+    const startOfDay = setHours(setMinutes(new Date(desiredDate), 0), 9); 
+    const endOfDay = setHours(setMinutes(new Date(desiredDate), 0), 18);
 
     return isWithinInterval(desiredDate, { start: startOfDay, end: endOfDay });
 };
 
-// Función para sugerir un horario disponible
 const suggestAvailableTime = (listParse, businessStartTime, businessEndTime) => {
     const currentTime = new Date();
 
@@ -69,7 +65,6 @@ const suggestAvailableTime = (listParse, businessStartTime, businessEndTime) => 
     while (isAfter(suggestedTime, currentTime)) {
         const suggestedEndTime = addMinutes(suggestedTime, DURATION_MEET);
 
-        // Verificar si el bloque de tiempo sugerido está disponible
         const isAvailable = listParse.every(({ fromDate, toDate }) =>
             !isWithinInterval(suggestedTime, { start: fromDate, end: toDate }) &&
             !isWithinInterval(suggestedEndTime, { start: fromDate, end: toDate })
@@ -79,26 +74,26 @@ const suggestAvailableTime = (listParse, businessStartTime, businessEndTime) => 
             return suggestedTime;
         }
 
-        // Incrementamos el tiempo sugerido por 30 minutos
         suggestedTime = addMinutes(suggestedTime, 30);
     }
 
-    return null; // Si no hay horarios disponibles
+    return null; 
 };
 
-// Flujo para consultar y agendar citas
+const parseDateExpression = (expression: string) => {
+    const parsedDate = chrono.parseDate(expression);
+    return parsedDate;
+};
+
 export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { extensions, state, flowDynamic, endFlow }) => {
     await flowDynamic('Dame un momento para consultar la agenda...');
     const ai = extensions.ai as AIClass;
     const history = getHistoryParse(state);
 
-    // Obtenemos la agenda actual
     const listParse = await getCurrentCalendar();
 
-    // Generamos el prompt para el modelo AI
     const promptFilter = generatePromptFilter(history);
 
-    // Obtenemos la fecha deseada del usuario
     const { date } = await ai.desiredDateFn([
         {
             role: 'system',
@@ -106,30 +101,25 @@ export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { ex
         },
     ]);
 
-    // Si el usuario no proporciona una fecha, sugerir un horario
+    let desiredDate;
     if (!date) {
-        const businessStartTime = parse(BUSINESS_HOURS.start, 'HH:mm', new Date());
-        const businessEndTime = parse(BUSINESS_HOURS.end, 'HH:mm', new Date());
-
-        const suggestedTime = suggestAvailableTime(listParse, businessStartTime, businessEndTime);
-
-        if (suggestedTime) {
-            const formattedSuggestedTime = format(suggestedTime, 'yyyy/MM/dd HH:mm');
-            await flowDynamic(`No mencionaste un horario específico. Te sugiero el siguiente horario disponible: ${formattedSuggestedTime}. ¿Te gustaría reservar ese horario?`);
-            await handleHistory({ content: `Sugerido: ${formattedSuggestedTime}`, role: 'assistant' }, state);
-            await state.update({ desiredDate: suggestedTime });
-            return;
-        } else {
-            const message = 'Lo siento, no tengo disponibilidad en este momento. ¿Te gustaría intentar con otra fecha u horario?';
-            await flowDynamic(message);
-            await handleHistory({ content: message, role: 'assistant' }, state);
-            return endFlow();
-        }
+        const message = 'Lo siento, no pude entender tu solicitud. ¿Podrías darme más detalles sobre la fecha y hora?';
+        await flowDynamic(message);
+        await handleHistory({ content: message, role: 'assistant' }, state);
+        return endFlow();
     }
 
-    const desiredDate = roundToNearest30Minutes(parse(date, 'yyyy/MM/dd HH:mm:ss', new Date()));
+    // Si no es una fecha exacta, intentar interpretar expresiones como "lunes que viene"
+    const parsedDate = parseDateExpression(date);
+    if (parsedDate) {
+        desiredDate = roundToNearest30Minutes(parsedDate);
+    } else {
+        const message = 'No pude entender la fecha. ¿Podrías proporcionarme más detalles?';
+        await flowDynamic(message);
+        await handleHistory({ content: message, role: 'assistant' }, state);
+        return endFlow();
+    }
 
-    // Validar que la fecha sea válida
     if (!isValid(desiredDate)) {
         const message = 'La fecha proporcionada no es válida. Por favor, intenta de nuevo con el formato correcto: `YYYY/MM/DD HH:mm`.';
         await flowDynamic(message);
@@ -137,9 +127,8 @@ export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { ex
         return endFlow();
     }
 
-    const desiredEndDate = addMinutes(desiredDate, +DURATION_MEET);
+    const desiredEndDate = addMinutes(desiredDate, DURATION_MEET);
 
-    // Validamos si está dentro del horario de atención
     if (!isBusinessHours(desiredDate)) {
         const message = 'Lo siento, el horario solicitado está fuera del horario de atención (09:00 - 18:00). ¿Puedes elegir otro horario dentro de este rango?';
         await flowDynamic(message);
@@ -147,7 +136,6 @@ export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { ex
         return endFlow();
     }
 
-    // Validamos si el horario está disponible
     const isDateAvailable = listParse.every(({ fromDate, toDate }) =>
         !isWithinInterval(desiredDate, { start: fromDate, end: toDate }) &&
         !isWithinInterval(desiredEndDate, { start: fromDate, end: toDate })
@@ -160,14 +148,12 @@ export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { ex
         return endFlow();
     }
 
-    // Confirmación de reserva
     const formattedDateFrom = format(desiredDate, 'hh:mm a');
     const formattedDateTo = format(desiredEndDate, 'hh:mm a');
     const message = `¡Perfecto! Tenemos disponibilidad de ${formattedDateFrom} a ${formattedDateTo} el día ${format(desiredDate, 'dd/MM/yyyy')}. ¿Confirmo tu reserva?`;
     await handleHistory({ content: message, role: 'assistant' }, state);
     await state.update({ desiredDate });
 
-    // Enviar mensaje de confirmación dividido
     const chunks = message.split(/(?<!\d)\.\s+/g);
     for (const chunk of chunks) {
         await flowDynamic([{ body: chunk.trim(), delay: generateTimer(150, 250) }]);
