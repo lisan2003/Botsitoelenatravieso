@@ -7,4 +7,4 @@ export const CHATPDF_SRC = process.env.CHATPDF_SRC ?? ''
 
 export const DURATION_MEET = process.env.DURATION_MEET ?? ''
 
-
+export const OPENAI_API_KEY = process.env.OPEN_API_KEY ?? ''

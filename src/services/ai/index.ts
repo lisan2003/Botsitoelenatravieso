@@ -3,6 +3,7 @@ import fs from "fs";
 import { ChatCompletionMessageParam } from "openai/resources/chat";
 
 
+
 class AIClass {
     private openai: OpenAI;
     private model: string

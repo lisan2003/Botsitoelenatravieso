@@ -5,14 +5,14 @@ import { generateTimer } from "../utils/generateTimer";
 import { getCurrentCalendar } from "../services/calendar";
 import { getFullCurrentDate } from "src/utils/currentDate";
 import { flowConfirm } from "./confirm.flow";
-import { addMinutes, isWithinInterval, format, parse, setHours, setMinutes, isValid, isAfter } from "date-fns";
+import { addMinutes, isWithinInterval, format, setHours, setMinutes, isValid, isAfter } from "date-fns";
 import * as chrono from "chrono-node";
 
 // Definir horario de apertura y cierre del negocio
 const BUSINESS_HOURS = {
     start: '09:00', // Hora de apertura (formato 24h)
     end: '18:00',   // Hora de cierre (formato 24h)
-    days: ['lunes','martes','miercoles','jueves','viernes'], // Días de la semana
+    days: ['lunes', 'martes', 'miercoles', 'jueves', 'viernes'], // Días de la semana
 };
 
 const DURATION_MEET = Number(process.env.DURATION_MEET) ?? 45;
@@ -90,26 +90,46 @@ export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { ex
     const ai = extensions.ai as AIClass;
     const history = getHistoryParse(state);
 
-    const listParse = await getCurrentCalendar();
+    const occupiedSlots = await getCurrentCalendar(); // Traer horarios ocupados directamente como un array de objetos con 'fecha' y 'nombre'
+
+    // Convertir las fechas ocupadas a objetos Date para compararlas
+    const validOccupiedSlots = occupiedSlots.map((slot: any) => ({
+        fromDate: new Date(slot.fecha), // Convertir 'fecha' en Date
+        toDate: addMinutes(new Date(slot.fecha), DURATION_MEET), // Asumimos que las citas duran el tiempo especificado en DURATION_MEET
+    }));
 
     const promptFilter = generatePromptFilter(history);
 
-    const { date } = await ai.desiredDateFn([
-        {
-            role: 'system',
-            content: promptFilter,
-        },
-    ]);
+    const { date } = await ai.desiredDateFn([{
+        role: 'system',
+        content: promptFilter,
+    }]);
 
     let desiredDate;
     if (!date) {
-        const message = 'Lo siento, no pude entender tu solicitud. ¿Podrías darme más detalles sobre la fecha y hora?';
+        const message = 'Parece que no me diste una fecha o hora. ¿Podrías proporcionarme la fecha y hora que prefieres para tu cita?';
         await flowDynamic(message);
         await handleHistory({ content: message, role: 'assistant' }, state);
         return endFlow();
     }
 
-    // Si no es una fecha exacta, intentar interpretar expresiones como "lunes que viene"
+    // Si el usuario menciona la palabra "turno" sin especificar una fecha, ofrecer un horario
+    if (date.toLowerCase().includes("turno")) {
+        const availableTime = suggestAvailableTime(validOccupiedSlots, new Date(), new Date());
+        if (availableTime) {
+            const formattedDate = format(availableTime, 'yyyy/MM/dd HH:mm:ss');
+            const message = `El siguiente horario está disponible: ${formattedDate}. ¿Te gustaría reservarlo?`;
+            await flowDynamic(message);
+            await handleHistory({ content: message, role: 'assistant' }, state);
+        } else {
+            const message = 'Lo siento, no hay disponibilidad en este momento. ¿Te gustaría intentar con otro día o hora?';
+            await flowDynamic(message);
+            await handleHistory({ content: message, role: 'assistant' }, state);
+        }
+        return endFlow();
+    }
+
+    // Si el mensaje contiene una fecha, procesarla
     const parsedDate = parseDateExpression(date);
     if (parsedDate) {
         desiredDate = roundToNearest30Minutes(parsedDate);
@@ -121,7 +141,7 @@ export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { ex
     }
 
     if (!isValid(desiredDate)) {
-        const message = 'La fecha proporcionada no es válida. Por favor, intenta de nuevo con el formato correcto: `YYYY/MM/DD HH:mm`.';
+        const message = 'La fecha proporcionada no es válida. Por favor, intenta de nuevo con el formato correcto: `YYYY/MM/DD HH:mm`';
         await flowDynamic(message);
         await handleHistory({ content: message, role: 'assistant' }, state);
         return endFlow();
@@ -136,13 +156,13 @@ export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { ex
         return endFlow();
     }
 
-    const isDateAvailable = listParse.every(({ fromDate, toDate }) =>
-        !isWithinInterval(desiredDate, { start: fromDate, end: toDate }) &&
-        !isWithinInterval(desiredEndDate, { start: fromDate, end: toDate })
-    );
+    // Verificar si el horario deseado está ocupado
+    const isDateAvailable = validOccupiedSlots.every(({ fromDate, toDate }: { fromDate: Date, toDate: Date }) => {
+        return !isWithinInterval(desiredDate, { start: fromDate, end: toDate });
+    });
 
     if (!isDateAvailable) {
-        const message = 'Lo siento, esa hora ya está reservada. ¿Podrías elegir otra fecha u horario?';
+        const message = 'Lo siento, esa hora ya está reservada. ¿Podrías elegir otro horario?';
         await flowDynamic(message);
         await handleHistory({ content: message, role: 'assistant' }, state);
         return endFlow();
@@ -168,6 +188,6 @@ export const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { ex
         return gotoFlow(flowConfirm);
     }
 
-    const message = 'Lo siento, no pude procesar tu solicitud. ¿Te gustaría intentar con otra fecha o día?';
+    const message = 'Lo siento, no pude procesar tu respuesta. ¿Quieres confirmar o cambiar tu reserva?';
     await flowDynamic(message);
 });
