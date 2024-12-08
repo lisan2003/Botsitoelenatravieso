@@ -4,3 +4,4 @@ node_modules
 *.png
 *_sessions
 dist/*
+bot_sessions/*  
