@@ -46,26 +46,7 @@ const flowSeller = addKeyword(EVENTS.ACTION)
             const ai = extensions.ai as AIClass
             const history = getHistoryParse(state)
             
-            const dataBase =`
-                ¡Descubre la belleza de la micropigmentación!
-
-                Realzamos tu belleza natural con técnicas de maquillaje semipermanente diseñadas para destacar tus mejores rasgos. 💖
-
-                🌟 Cejas:
-                Creamos un diseño personalizado y aplicamos pigmentación para un acabado natural que dura hasta 2 años.
-                Nuestros servicios:
-                🌟 Labios:
-                Damos color y definición para un look fresco y uniforme que puede durar entre 1 y 3 años.
-                
-                Precios:
-                💼 Cejas: $100
-                💼 Labios: $500
-                
-                ¿Listo para lucir increíble?
-                ✨ Consulta disponibilidad y resuelve todas tus dudas aquí.
-                `;
-                
-            //const dataBase = await pdfQuery(ctx.body)
+            const dataBase = process.env.DATA_BASE ?? ''
             console.log({dataBase})
             const promptInfo = generatePromptSeller(history, dataBase)
 
