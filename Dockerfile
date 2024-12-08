@@ -39,5 +39,7 @@ RUN pnpm install --frozen-lockfile --production
 # Exponer el puerto de la aplicación
 EXPOSE 3000
 
+RUN npm install -g eslint
+
 # Comando de inicio
 CMD ["pnpm", "start"]
