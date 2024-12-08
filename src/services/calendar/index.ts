@@ -90,7 +90,7 @@ const getCurrentCalendar = async (): Promise<{ fromDate: Date; toDate: Date }[]>
  * @param payload Datos del evento a agregar.
  * @returns Respuesta de la API.
  */
-const appToCalendar = async (payload: { name: string; email: string; startDate: string; endDate: string; phone: string }) => {
+const appToCalendar = async (payload: { name: string; email: string; startDate: string; phone: string }) => {
     try {
         const response = await fetch(MAKE_ADD_TO_CALENDAR, {
             method: 'POST',
