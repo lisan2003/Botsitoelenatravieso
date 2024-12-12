@@ -45,8 +45,8 @@ const flowSeller = addKeyword(EVENTS.ACTION)
 
             const ai = extensions.ai as AIClass
             const history = getHistoryParse(state)
-            
-            const dataBase = process.env.DATA_BASE ?? ''
+
+            const dataBase = process.env.DATABASE ?? 'No hay base de datos'
             console.log({dataBase})
             const promptInfo = generatePromptSeller(history, dataBase)
 

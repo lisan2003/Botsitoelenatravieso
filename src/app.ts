@@ -2,7 +2,6 @@ import 'dotenv/config'
 import { createBot, MemoryDB } from '@builderbot/bot'
 import AIClass from './services/ai';
 import flow from './flows';
-// import { providerTelegram as provider } from './provider/telegram';
 import { provider } from './provider';
 
 const PORT = process.env.PORT ?? 3001
