@@ -5,9 +5,22 @@ import { generateTimer } from "../utils/generateTimer";
 import { getCurrentCalendar } from "../services/calendar";
 import { getFullCurrentDate } from "src/utils/currentDate";
 import { flowConfirm } from "./confirm.flow";
-import { addMinutes, isWithinInterval, format, parse,getHours} from "date-fns";
+import {
+    addMinutes,
+    parse,
+    format,
+    getHours,
+    getDay,
+    addDays,
+} from "date-fns";
 
-const DURATION_MEET = process.env.DURATION_MEET ?? 60
+const DURATION_MEET = parseInt(process.env.DURATION_MEET ?? "60", 10);
+
+interface CalendarEntry {
+    name: string;
+    fromDate: Date;
+    toDate: Date;
+}
 
 const PROMPT_FILTER_DATE = `
 ### Contexto
@@ -22,64 +35,120 @@ Eres un asistente de inteligencia artificial. Tu propósito es determinar la fec
 Asistente: "{respuesta en formato (yyyy/MM/dd HH:mm:ss)}"
 `;
 
-const generatePromptFilter = (history: string) => {
+const generatePromptFilter = (history: string): string => {
     const nowDate = getFullCurrentDate();
-    const mainPrompt = PROMPT_FILTER_DATE
-        .replace('{HISTORY}', history)
-        .replace('{CURRENT_DAY}', nowDate);
+    return PROMPT_FILTER_DATE.replace("{HISTORY}", history).replace(
+        "{CURRENT_DAY}",
+        nowDate
+    );
+};
 
-    return mainPrompt;
-}
+let lastScheduledDate: Date | null = null; // Variable para almacenar el último turno agendado
 
-const flowSchedule = addKeyword(EVENTS.ACTION).addAction(async (ctx, { extensions, state, flowDynamic, endFlow }) => {
-    await flowDynamic('Dame un momento para consultar la agenda...');
-    const ai = extensions.ai as AIClass;
-    const history = getHistoryParse(state);
-    const list = await getCurrentCalendar()
+const flowSchedule = addKeyword(EVENTS.ACTION)
+    .addAction(async (ctx, { extensions, state, flowDynamic, endFlow }) => {
+        await flowDynamic("Dame un momento para consultar la agenda...");
+        const ai = extensions.ai as AIClass;
+        const history = getHistoryParse(state);
 
-    const listParse = list
-        .map((d) => parse(d, 'yyyy/MM/dd HH:mm:ss', new Date()))
-        .map((fromDate) => ({ fromDate, toDate: addMinutes(fromDate, +DURATION_MEET) }));
+        // Obtener y tipar correctamente la lista de horarios ocupados
+        const calendarList: string[] = await getCurrentCalendar();
+        const parsedList: CalendarEntry[] = calendarList.map((entry) => {
+            const [name, rawDate] = entry.split(",");
+            const fromDate = parse(rawDate.trim(), "yyyy/MM/dd HH:mm:ss", new Date());
+            return {
+                name,
+                fromDate,
+                toDate: addMinutes(fromDate, DURATION_MEET),
+            };
+        });
 
-    const promptFilter = generatePromptFilter(history);
+        // Generar el prompt para determinar la fecha deseada
+        const promptFilter = generatePromptFilter(history);
+        const { date }: { date: string } = await ai.desiredDateFn([
+            { role: "system", content: promptFilter },
+        ]);
 
-    const { date } = await ai.desiredDateFn([
-        {
-            role: 'system',
-            content: promptFilter
+        let desiredDate = parse(date, "yyyy/MM/dd HH:mm:ss", new Date());
+
+        // Validar si el horario solicitado ya está ocupado
+        const isDateOccupied = parsedList.some(
+            ({ fromDate, toDate }) =>
+                desiredDate < toDate && addMinutes(desiredDate, DURATION_MEET) > fromDate
+        );
+
+        if (isDateOccupied) {
+            // Si el horario solicitado está ocupado, buscar el siguiente disponible
+            let nextAvailableDate = new Date(desiredDate);
+            let foundAvailable = false;
+
+            // Intentar encontrar el próximo horario disponible
+            while (!foundAvailable) {
+                nextAvailableDate = addMinutes(nextAvailableDate, DURATION_MEET);
+                const isNextDateOccupied = parsedList.some(
+                    ({ fromDate, toDate }) =>
+                        nextAvailableDate < toDate && addMinutes(nextAvailableDate, DURATION_MEET) > fromDate
+                );
+                if (!isNextDateOccupied) {
+                    foundAvailable = true;
+                }
+            }
+
+            // Proponer el siguiente horario disponible
+            const formattedDate = format(nextAvailableDate, "yyyy/MM/dd HH:mm:ss");
+            const msg = `El horario cercano disponible es: ${formattedDate}. ¿Confirmo tu reserva en este horario? *si*`;
+            await flowDynamic(msg);
+            await handleHistory({ content: msg, role: "assistant" }, state);
+            await state.update({ desiredDate: nextAvailableDate });
+            return endFlow();
         }
-    ]);
 
-    const desiredDate = parse(date, 'yyyy/MM/dd HH:mm:ss', new Date());
+        // Validar horarios laborales (9:00 - 16:00)
+        const desiredHour = getHours(desiredDate);
+        if (desiredHour < 9 || desiredHour >= 16) {
+            const msg =
+                "Lo siento, esa hora está fuera del horario laboral. ¿Alguna otra fecha y hora?";
+            await flowDynamic(msg);
+            await handleHistory({ content: msg, role: "assistant" }, state);
+            return endFlow();
+        }
 
-    const isDateAvailable = listParse.every(({ fromDate, toDate }) => !isWithinInterval(desiredDate, { start: fromDate, end: toDate }));
-    console.log(isDateAvailable)
-  
-    if(!isDateAvailable||getHours(desiredDate)<9||getHours(desiredDate)>16){
-        const m = 'Lo siento, esa hora ya está reservada. ¿Alguna otra fecha y hora?';
-        await flowDynamic(m);
-        await handleHistory({ content: m, role: 'assistant' }, state);
-        return endFlow()
-    }
+        // Validar fines de semana
+        const dayOfWeek = getDay(desiredDate);
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+            const msg =
+                "Lo siento, no trabajamos los fines de semana. Por favor, indícame otra fecha y hora.";
+            await flowDynamic(msg);
+            await handleHistory({ content: msg, role: "assistant" }, state);
+            return endFlow();
+        }
 
-    const formattedDateFrom = format(desiredDate, 'hh:mm a');
-    const formattedDateTo = format(addMinutes(desiredDate, +DURATION_MEET), 'hh:mm a');
-    const message = `¡Perfecto! Tenemos disponibilidad de ${formattedDateFrom} a ${formattedDateTo} el día ${format(desiredDate, 'dd/MM/yyyy')}. ¿Confirmo tu reserva? *si*`;
-    await handleHistory({ content: message, role: 'assistant' }, state);
-    await state.update({ desiredDate })
+        // Confirmar disponibilidad y sugerir horario
+        const formattedDate = format(desiredDate, "yyyy/MM/dd HH:mm:ss");
+        const msg = `¡Perfecto! El horario ${formattedDate} está disponible. ¿Confirmo tu reserva? *si*`;
+        await flowDynamic(msg);
+        await handleHistory({ content: msg, role: "assistant" }, state);
 
-    const chunks = message.split(/(?<!\d)\.\s+/g);
-    for (const chunk of chunks) {
-        await flowDynamic([{ body: chunk.trim(), delay: generateTimer(150, 250) }]);
-    }
-}).addAction({capture:true}, async ({body},{gotoFlow, flowDynamic, state}) => {
+        // Actualizar el estado con la fecha deseada
+        lastScheduledDate = desiredDate; // Guardar la última fecha agendada
+        await state.update({ desiredDate });
+    })
+    .addAction({ capture: true }, async ({ body }, { gotoFlow, flowDynamic, state }) => {
+        const confirmationWords = [
+            "si",
+            "claro",
+            "por supuesto",
+            "vale",
+            "ok",
+            "de acuerdo",
+            "entendido",
+            "dale",
+        ];
+        if (confirmationWords.some((word) => body.toLowerCase().includes(word))) {
+            return gotoFlow(flowConfirm);
+        }
+        await flowDynamic("¿Alguna otra fecha y hora?");
+        await state.update({ desiredDate: null });
+    });
 
-  const confirmationWords = ["si", "claro", "por supuesto", "vale", "ok", "de acuerdo", "entendido","dale"]; 
-  if (confirmationWords.some(word => body.toLowerCase().includes(word))) 
-  { return gotoFlow(flowConfirm); }
-    await flowDynamic('¿Alguna otra fecha y hora?')
-    await state.update({desiredDate:null})
-})
-
-
-export { flowSchedule }
+export { flowSchedule };

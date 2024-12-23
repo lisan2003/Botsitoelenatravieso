@@ -1,7 +1,7 @@
 import { addKeyword, EVENTS } from "@builderbot/bot";
 import { clearHistory } from "../utils/handleHistory";
 import { addMinutes, format } from "date-fns";
-import { appToCalendar } from "src/services/calendar";
+import { appToCalendar } from "src/services/calendar/";
 
 const DURATION_MEET = process.env.DURATION_MEET ?? 60
 /**
@@ -34,7 +34,7 @@ const flowConfirm = addKeyword(EVENTS.ACTION).addAction(async (_, { flowDynamic 
         }
 
         await appToCalendar(dateObject)
-        
+
         clearHistory(state)
         await flowDynamic('Listo! agendado Buen dia')
     })
