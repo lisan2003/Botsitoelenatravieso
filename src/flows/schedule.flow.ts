@@ -165,7 +165,29 @@ const flowSchedule = addKeyword(EVENTS.ACTION)
             "ok",
             "de acuerdo",
             "entendido",
-            "dale"
+            "dale",
+            "genial",
+            "confirmo",
+            "confirmar",
+            "afirmativo",
+            "correcto",
+            "exacto",
+            "perfecto",
+            "eso es",
+            "por supuesto",
+            "de acuerdo",
+            "sin problema",
+            "seguro",
+            "claro que sí",
+            "todo bien",
+            "obvio",
+            "por supuesto que sí",
+            "lo tengo",
+            "entendido",
+            "hecho",
+            "va",
+            "listo",
+            "es cierto"
         ];
         if (confirmationWords.some((word) => body.toLowerCase().includes(word))) {
             return gotoFlow(flowConfirm);
