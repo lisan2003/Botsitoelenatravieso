@@ -45,8 +45,8 @@ const generatePromptFilter = (history: string): string => {
 };
 
  // Proponer el siguiente horario disponible
- const earliestHour = 9;
- const latestHour = 16;
+ const earliestHour = 8;
+ const latestHour = 20;
  
 
 let lastScheduledDate: Date | null = null; // Variable para almacenar el último turno agendado
